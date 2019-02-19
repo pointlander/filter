@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"math/rand"
 
 	"gonum.org/v1/plot"
@@ -42,16 +43,21 @@ func main() {
 		return rate / filter
 	}
 
+	lastSpike, lastRatio := 0, 0.0
+
 	// simulator
-	time, points := 0, make(plotter.XYs, 0, 2*MemorySize*1024)
+	time, points, probabilities := 0, make(plotter.XYs, 0, 2*MemorySize*1024), make(plotter.XYs, 0, 2*MemorySize*1024)
 	simulate := func(requests, delta int) (spikes int) {
 		for i := 0; i < requests; i++ {
 			time += rand.Intn(delta) + 1
 			ratio := lowpass(time)
 			if ratio > Threshold {
+				lastSpike, lastRatio = time, ratio-1
 				spikes++
 			}
 			points = append(points, plotter.XY{X: float64(time), Y: ratio})
+			probability := 1 / (1 + lastRatio*math.Exp(.00001*float64(lastSpike-time)))
+			probabilities = append(probabilities, plotter.XY{X: float64(time), Y: probability})
 		}
 		return
 	}
@@ -87,7 +93,22 @@ func main() {
 		panic("there should be no spike")
 	}
 
-	// graph the results
+	// base load resumes
+	if simulate(MemorySize*1024, 8) > 0 {
+		panic("there should be no spike")
+	}
+
+	// burst of traffic
+	if simulate(1024, 2) == 0 {
+		panic("there should have been a spike")
+	}
+
+	// base load resumes
+	if simulate(MemorySize*1024, 8) > 0 {
+		panic("there should be no spike")
+	}
+
+	// graph the ratio results
 	p, err := plot.New()
 	if err != nil {
 		panic(err)
@@ -106,6 +127,29 @@ func main() {
 	p.Add(s)
 
 	err = p.Save(8*vg.Inch, 8*vg.Inch, "points.png")
+	if err != nil {
+		panic(err)
+	}
+
+	// graph the probability results
+	p, err = plot.New()
+	if err != nil {
+		panic(err)
+	}
+
+	p.Title.Text = "don't drop probabiltiy"
+	p.X.Label.Text = "time"
+	p.Y.Label.Text = "probabiltiy"
+
+	s, err = plotter.NewScatter(probabilities)
+	if err != nil {
+		panic(err)
+	}
+	s.GlyphStyle.Radius = vg.Length(1)
+	s.GlyphStyle.Shape = draw.CircleGlyph{}
+	p.Add(s)
+
+	err = p.Save(8*vg.Inch, 8*vg.Inch, "probabilities.png")
 	if err != nil {
 		panic(err)
 	}
